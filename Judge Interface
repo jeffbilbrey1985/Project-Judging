@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pitch Evaluation</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --bg: #f8fafc;
+            --card: #ffffff;
+            --text: #1e293b;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            width: 100%;
+            max-width: 500px;
+        }
+        h1 { font-size: 1.5rem; text-align: center; margin-bottom: 20px; }
+        .section {
+            background: var(--card);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .section-title {
+            font-weight: bold;
+            margin-bottom: 12px;
+            display: block;
+            border-bottom: 1px solid #e2e8f0;
+            padding-bottom: 8px;
+        }
+        label { display: block; margin-bottom: 6px; font-size: 0.9rem; font-weight: 500; }
+        input[type="text"], input[type="password"], textarea, select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            box-sizing: border-box;
+            font-size: 1rem;
+        }
+        .score-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        .score-btn {
+            border: 1px solid #cbd5e1;
+            background: white;
+            padding: 8px;
+            border-radius: 6px;
+            cursor: pointer;
+            text-align: center;
+        }
+        .score-btn.active {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+        textarea { height: 60px; resize: vertical; margin-top: 8px; }
+        button#submitBtn {
+            width: 100%;
+            padding: 14px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        button#submitBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .msg {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+            text-align: center;
+        }
+        .msg-error { background: #fee2e2; color: #991b1b; }
+        .msg-success { background: #dcfce7; color: #166534; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Pitch Judging</h1>
+    <div id="statusMsg" class="msg"></div>
+
+    <form id="judgeForm">
+        <div class="section">
+            <label for="passcode">Access Code</label>
+            <input type="password" id="passcode" required placeholder="Enter meeting code">
+        </div>
+
+        <div class="section">
+            <label for="presenter">Presenter Name</label>
+            <input type="text" id="presenter" required placeholder="Who is presenting?">
+        </div>
+
+        <!-- Section Template -->
+        <div class="section" data-key="tp">
+            <span class="section-title">A) Triple Play Pitch</span>
+            <div class="score-grid" id="tpGrid"></div>
+            <textarea id="tpComment" placeholder="Comments (optional)"></textarea>
+        </div>
+
+        <div class="section" data-key="mq">
+            <span class="section-title">B) Mobile Quote Sheet</span>
+            <div class="score-grid" id="mqGrid"></div>
+            <textarea id="mqComment" placeholder="Comments (optional)"></textarea>
+        </div>
+
+        <div class="section" data-key="uq">
+            <span class="section-title">C) Upgrade Quote Sheet</span>
+            <div class="score-grid" id="uqGrid"></div>
+            <textarea id="uqComment" placeholder="Comments (optional)"></textarea>
+        </div>
+
+        <div class="section" data-key="bq">
+            <span class="section-title">D) Bundle Quote Sheet</span>
+            <div class="score-grid" id="bqGrid"></div>
+            <textarea id="bqComment" placeholder="Comments (optional)"></textarea>
+        </div>
+
+        <button type="submit" id="submitBtn">Submit Rating</button>
+    </form>
+</div>
+
+<script>
+    const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxzzmU61o4_f2YwQZPqlF3vtE6sl56L9_9lGBszYRpuSkf65o0ET5B7PP_cUUb05jmB/exec";
+    const scores = { tp: 0, mq: 0, uq: 0, bq: 0 };
+
+    // Generate Score Grids
+    ['tp', 'mq', 'uq', 'bq'].forEach(key => {
+        const grid = document.getElementById(key + 'Grid');
+        for(let i=1; i<=10; i++) {
+            const btn = document.createElement('div');
+            btn.className = 'score-btn';
+            btn.innerText = i;
+            btn.onclick = () => {
+                grid.querySelectorAll('.score-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                scores[key] = i;
+            };
+            grid.appendChild(btn);
+        }
+    });
+
+    // Session ID for simple rate limiting
+    if (!localStorage.getItem('pitch_session_id')) {
+        localStorage.setItem('pitch_session_id', 'sess_' + Math.random().toString(36).substr(2, 9));
+    }
+
+    const form = document.getElementById('judgeForm');
+    const msg = document.getElementById('statusMsg');
+    const btn = document.getElementById('submitBtn');
+
+    form.onsubmit = async (e) => {
+        e.preventDefault();
+        
+        // Basic Validation
+        if (Object.values(scores).some(s => s === 0)) {
+            showMsg("Please provide a score for all 4 sections.", "error");
+            return;
+        }
+
+        btn.disabled = true;
+        btn.innerText = "Submitting...";
+
+        const payload = {
+            passcode: document.getElementById('passcode').value,
+            presenter: document.getElementById('presenter').value,
+            tpScore: scores.tp,
+            tpComment: document.getElementById('tpComment').value,
+            mqScore: scores.mq,
+            mqComment: document.getElementById('mqComment').value,
+            uqScore: scores.uq,
+            uqComment: document.getElementById('uqComment').value,
+            bqScore: scores.bq,
+            bqComment: document.getElementById('bqComment').value,
+            sessionId: localStorage.getItem('pitch_session_id')
+        };
+
+        try {
+            const response = await fetch(WEB_APP_URL, {
+                method: 'POST',
+                mode: 'no-cors', // Apps Script requires no-cors for POST
+                body: JSON.stringify(payload)
+            });
+            
+            // Because of no-cors, we can't read the response body directly, 
+            // but we can assume success if no error is thrown in the fetch.
+            showMsg("Rating submitted successfully!", "success");
+            form.reset();
+            document.querySelectorAll('.score-btn').forEach(b => b.classList.remove('active'));
+            Object.keys(scores).forEach(k => scores[k] = 0);
+            window.scrollTo(0,0);
+        } catch (err) {
+            showMsg("Error: " + err.message, "error");
+        } finally {
+            btn.disabled = false;
+            btn.innerText = "Submit Rating";
+        }
+    };
+
+    function showMsg(text, type) {
+        msg.innerText = text;
+        msg.className = 'msg msg-' + type;
+        msg.style.display = 'block';
+    }
+</script>
+</body>
+</html>
